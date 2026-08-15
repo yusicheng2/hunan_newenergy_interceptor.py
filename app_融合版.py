@@ -103,7 +103,11 @@ def parse_location(text):
     return None, None, False
 
 
-def recommend_voltage(capacity, project_type):
+def recommend_voltage(capacity, project_type, location=""):
+    # 特殊地址处理规则：锁定 10kV 氢能工业园区电网环境
+    if location and "杉杉大道525号" in location:
+        return "10(6) kV"
+        
     if project_type == "用户侧储能" and capacity <= 6:
         return "10(6) kV"
     if capacity <= 6:
@@ -144,7 +148,11 @@ def get_default_capex(project_type):
 # 合规校验函数
 # ============================================================
 
-def evaluate_land(project_type, land_use, has_certificate, self_use_ratio):
+def evaluate_land(project_type, land_use, has_certificate, self_use_ratio, location=""):
+    # 针对特定地址的风电建设适用性拦截限制
+    if project_type == "风电" and location and "杉杉大道525号" in location:
+        return {"status": "拦截", "message": "该地址为10kV氢能工业园，周边空间及风资源条件不适宜安装常规风电项目（微风风机除外），建议重新选址或更改新能源类型。", "pass": False}
+
     if land_use == "红线外":
         return {"status": "通过", "message": "项目用地初步判断位于红线外，需进一步取得用地预审与规划选址意见。", "pass": True}
     if land_use == "红线内需审批":
@@ -206,7 +214,7 @@ def evaluate_green_direct(project_type, self_use_ratio, selected_voltage):
 def build_risks(project_type, capacity, market_participation, self_use_ratio, land_res, grid_res, voltage_res, green_res):
     risks = []
     if land_res["status"] == "拦截":
-        risks.append(f"🔴 **高风险｜用地红线**：{land_res['message']}")
+        risks.append(f"🔴 **高风险｜用地与选址匹配**：{land_res['message']}")
     elif land_res["status"] == "警告":
         risks.append(f"🟡 **中风险｜用地合规**：{land_res['message']}")
     if grid_res["status"] == "拦截":
@@ -320,7 +328,7 @@ def build_markdown_report(project_type, capacity_str, project_location, selected
         f"- **装机容量**：{capacity_str}",
         f"- **接入电压等级**：{selected_voltage}",
         f"\n## 二、 合规校验结果 (总体状态: {overall_status})",
-        f"- **用地性质红线**：{land_res['status']} - {land_res['message']}",
+        f"- **用地与选址评估**：{land_res['status']} - {land_res['message']}",
         f"- **电网消纳红区**：{grid_res['status']} - {grid_res['message']}",
         f"- **接入电压等级**：{voltage_res['status']} - {voltage_res['message']}"
     ]
@@ -385,7 +393,7 @@ def main():
             capacity_mwh = 0.0
             capacity_str = f"{capacity} MW"
 
-        recommended_voltage = recommend_voltage(capacity, project_type)
+        recommended_voltage = recommend_voltage(capacity, project_type, project_location)
         st.write(f"**系统推荐接入电压等级**：**{recommended_voltage}**")
         st.info("电压等级已强制使用系统推荐，实际仍需以国网湖南电力接入系统方案为准。")
 
@@ -433,10 +441,10 @@ def main():
                 lat, lon = 28.2, 112.9
                 st.warning("未能从输入中解析有效坐标，已默认定位到长沙市示例坐标。")
 
-            recommended_voltage = recommend_voltage(capacity, project_type)
+            recommended_voltage = recommend_voltage(capacity, project_type, project_location)
             selected_voltage = recommended_voltage
 
-            land_res = evaluate_land(project_type, land_use, has_certificate, self_use_ratio)
+            land_res = evaluate_land(project_type, land_use, has_certificate, self_use_ratio, project_location)
             grid_res = evaluate_grid(consumption_zone, lat, lon, capacity, project_type)
             voltage_res = evaluate_voltage(selected_voltage, recommended_voltage, capacity, project_type)
             green_res = evaluate_green_direct(project_type, self_use_ratio, selected_voltage)
@@ -457,7 +465,7 @@ def main():
             st.error("❌ 项目触发事前拦截项。")
 
         col1, col2, col3, col4 = st.columns(4)
-        col1.metric("用地性质红线", land_res["status"], delta="合规" if land_res["pass"] else "风险")
+        col1.metric("用地与选址评估", land_res["status"], delta="合规" if land_res["pass"] else "风险")
         col2.metric("电网消纳红区", grid_res["status"], delta="可继续" if grid_res["pass"] else "拦截")
         col3.metric("接入电压等级", voltage_res["status"], delta=f"推荐：{recommended_voltage}")
         col4.metric("绿电直连专项", green_res["status"], delta="适用" if project_type == "绿电直连" else "非绿电直连")
