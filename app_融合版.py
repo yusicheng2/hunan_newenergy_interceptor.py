@@ -7,13 +7,30 @@ import re
 import requests
 
 # ============================================================
-# 页面配置
+# 页面配置与全局样式
 # ============================================================
 
 st.set_page_config(
     page_title="湖南省新能源项目合规风险自检与测算系统",
     layout="wide",
     initial_sidebar_state="expanded"
+)
+
+# 注入自定义 CSS 以调小 st.metric 的字体，防止数值被截断显示省略号
+st.markdown(
+    """
+    <style>
+    /* 调小测算报告中的 Metric 数值和标题字体，并允许换行 */
+    [data-testid="stMetricValue"] {
+        font-size: 1.4rem !important;
+        white-space: normal !important;
+    }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.95rem !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 PROJECT_TYPES = ["光伏", "风电", "用户侧储能", "绿电直连"]
@@ -79,7 +96,7 @@ def parse_location(text):
     except Exception:
         pass # 接口超时或网络异常时，静默失败，走底部默认处理
 
-    # 3. 兜底方案：为了确保你在截图中的“资兴”地址能够顺畅演示
+    # 3. 兜底方案：确保示例地址演示顺畅
     if "资兴" in text:
         return 25.9765, 113.2356, True
 
@@ -112,11 +129,11 @@ def get_default_hours(project_type):
 
 def get_default_capex(project_type):
     if project_type == "光伏":
-        return 380.0
+        return 280.0
     elif project_type == "风电":
         return 620.0
     elif project_type == "用户侧储能":
-        return 2200.0
+        return 70.0
     elif project_type == "绿电直连":
         return 420.0
     else:
@@ -222,9 +239,10 @@ def build_risks(project_type, capacity, market_participation, self_use_ratio, la
 # 财务测算函数
 # ============================================================
 
-def calculate_finance(project_type, capacity, hours, capex_wan_per_mw, mechanism_price, market_price, self_use_price, self_use_ratio, peak_valley_spread, storage_duration, cycle_days=330, roundtrip_eff=0.87):
-    capex_wan = capacity * capex_wan_per_mw
+def calculate_finance(project_type, capacity, hours, capex_input, mechanism_price, market_price, self_use_price, self_use_ratio, peak_valley_spread, storage_duration, cycle_days=330, roundtrip_eff=0.87):
+    # 根据类型适配造价计算逻辑
     if project_type == "用户侧储能":
+        capex_wan = capacity * storage_duration * capex_input  # 容量(MWh) * 单价(万元/MWh)
         annual_discharge_kwh = capacity * storage_duration * 1000 * cycle_days
         annual_revenue_yuan = annual_discharge_kwh * peak_valley_spread * roundtrip_eff
         annual_revenue_wan = annual_revenue_yuan / 10000
@@ -233,28 +251,32 @@ def calculate_finance(project_type, capacity, hours, capex_wan_per_mw, mechanism
         payback = capex_wan / net_income_wan if net_income_wan > 0 else None
         simple_return = net_income_wan / capex_wan * 100 if capex_wan > 0 and net_income_wan > 0 else None
         return {"capex_wan": capex_wan, "annual_energy_kwh": annual_discharge_kwh, "annual_energy_display": f"{annual_discharge_kwh / 10000:,.0f} 万kWh/年放电量", "annual_revenue_wan": annual_revenue_wan, "opex_wan": opex_wan, "net_income_wan": net_income_wan, "payback_years": payback, "simple_return_pct": simple_return}
-    annual_generation_kwh = capacity * hours * 1000
-    if project_type == "绿电直连":
-        self_ratio = max(0.0, min(1.0, self_use_ratio / 100.0))
-        self_kwh = annual_generation_kwh * self_ratio
-        grid_kwh = annual_generation_kwh * min(1.0 - self_ratio, 0.20)
-        annual_revenue_yuan = self_kwh * self_use_price + grid_kwh * market_price
+    else:
+        capex_wan = capacity * capex_input  # 功率(MW) * 单价(万元/MW)
+        annual_generation_kwh = capacity * hours * 1000
+        
+        if project_type == "绿电直连":
+            self_ratio = max(0.0, min(1.0, self_use_ratio / 100.0))
+            self_kwh = annual_generation_kwh * self_ratio
+            grid_kwh = annual_generation_kwh * min(1.0 - self_ratio, 0.20)
+            annual_revenue_yuan = self_kwh * self_use_price + grid_kwh * market_price
+            annual_revenue_wan = annual_revenue_yuan / 10000
+            opex_wan = capex_wan * 0.02
+            net_income_wan = annual_revenue_wan - opex_wan
+            payback = capex_wan / net_income_wan if net_income_wan > 0 else None
+            simple_return = net_income_wan / capex_wan * 100 if capex_wan > 0 and net_income_wan > 0 else None
+            return {"capex_wan": capex_wan, "annual_energy_kwh": annual_generation_kwh, "annual_energy_display": f"{annual_generation_kwh / 10000:,.0f} 万kWh/年发电量", "annual_revenue_wan": annual_revenue_wan, "opex_wan": opex_wan, "net_income_wan": net_income_wan, "payback_years": payback, "simple_return_pct": simple_return, "self_kwh": self_kwh, "grid_kwh": grid_kwh}
+            
+        mechanism_ratio = 0.8
+        mechanism_kwh = annual_generation_kwh * mechanism_ratio
+        market_kwh = annual_generation_kwh * (1 - mechanism_ratio)
+        annual_revenue_yuan = mechanism_kwh * mechanism_price + market_kwh * market_price
         annual_revenue_wan = annual_revenue_yuan / 10000
-        opex_wan = capex_wan * 0.02
+        opex_wan = capex_wan * 0.015
         net_income_wan = annual_revenue_wan - opex_wan
         payback = capex_wan / net_income_wan if net_income_wan > 0 else None
         simple_return = net_income_wan / capex_wan * 100 if capex_wan > 0 and net_income_wan > 0 else None
-        return {"capex_wan": capex_wan, "annual_energy_kwh": annual_generation_kwh, "annual_energy_display": f"{annual_generation_kwh / 10000:,.0f} 万kWh/年发电量", "annual_revenue_wan": annual_revenue_wan, "opex_wan": opex_wan, "net_income_wan": net_income_wan, "payback_years": payback, "simple_return_pct": simple_return, "self_kwh": self_kwh, "grid_kwh": grid_kwh}
-    mechanism_ratio = 0.8
-    mechanism_kwh = annual_generation_kwh * mechanism_ratio
-    market_kwh = annual_generation_kwh * (1 - mechanism_ratio)
-    annual_revenue_yuan = mechanism_kwh * mechanism_price + market_kwh * market_price
-    annual_revenue_wan = annual_revenue_yuan / 10000
-    opex_wan = capex_wan * 0.015
-    net_income_wan = annual_revenue_wan - opex_wan
-    payback = capex_wan / net_income_wan if net_income_wan > 0 else None
-    simple_return = net_income_wan / capex_wan * 100 if capex_wan > 0 and net_income_wan > 0 else None
-    return {"capex_wan": capex_wan, "annual_energy_kwh": annual_generation_kwh, "annual_energy_display": f"{annual_generation_kwh / 10000:,.0f} 万kWh/年发电量", "annual_revenue_wan": annual_revenue_wan, "opex_wan": opex_wan, "net_income_wan": net_income_wan, "payback_years": payback, "simple_return_pct": simple_return, "mechanism_kwh": mechanism_kwh, "market_kwh": market_kwh}
+        return {"capex_wan": capex_wan, "annual_energy_kwh": annual_generation_kwh, "annual_energy_display": f"{annual_generation_kwh / 10000:,.0f} 万kWh/年发电量", "annual_revenue_wan": annual_revenue_wan, "opex_wan": opex_wan, "net_income_wan": net_income_wan, "payback_years": payback, "simple_return_pct": simple_return, "mechanism_kwh": mechanism_kwh, "market_kwh": market_kwh}
 
 
 # ============================================================
@@ -285,17 +307,17 @@ def render_gis_map(lat, lon, overall_status, project_type, capacity, address_tex
     return m
 
 # ============================================================
-# Markdown 报告生成函数 (新增)
+# Markdown 报告生成函数 
 # ============================================================
 
-def build_markdown_report(project_type, capacity, project_location, selected_voltage, land_res, grid_res, voltage_res, green_res, overall_status, risks, finance):
+def build_markdown_report(project_type, capacity_str, project_location, selected_voltage, land_res, grid_res, voltage_res, green_res, overall_status, risks, finance):
     report_lines = [
         f"# 湖南省新能源项目合规自检与测算报告",
         f"**生成时间**：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"\n## 一、 项目基础信息",
         f"- **项目类型**：{project_type}",
         f"- **项目地址**：{project_location}",
-        f"- **装机容量**：{capacity} MW",
+        f"- **装机容量**：{capacity_str}",
         f"- **接入电压等级**：{selected_voltage}",
         f"\n## 二、 合规校验结果 (总体状态: {overall_status})",
         f"- **用地性质红线**：{land_res['status']} - {land_res['message']}",
@@ -333,19 +355,27 @@ def main():
     st.title("🌟 湖南省新能源投资项目事前拦截与测算报告系统")
     st.caption(POLICY_CAPTION)
 
-    # 1. 初始化 session_state，用于记住报告是否需要显示
     if 'show_report' not in st.session_state:
         st.session_state.show_report = False
 
-    # 左侧输入（电压强制系统推荐）
+    # 左侧输入
     with st.sidebar.form("project_form"):
         st.header("📋 项目输入")
 
         project_type = st.selectbox("项目类型", PROJECT_TYPES, index=0)
         project_location = st.text_input("项目坐标或详细地址", value="资兴市杉杉大道525号")
-        capacity = st.number_input("装机容量 (MW)", min_value=0.1, max_value=1000.0, value=6.0, step=0.1)
+        
+        # 根据项目类型拆分容量参数设置
+        if project_type == "用户侧储能":
+            capacity = st.number_input("储能PCS额定功率 (MW)", min_value=0.1, max_value=1000.0, value=7.5, step=0.1)
+            capacity_mwh = st.number_input("储能装机容量 (MWh)", min_value=0.1, max_value=2000.0, value=15.0, step=0.1)
+            storage_duration = capacity_mwh / capacity if capacity > 0 else 2.0
+            capacity_str = f"{capacity} MW / {capacity_mwh} MWh"
+        else:
+            capacity = st.number_input("装机容量 (MW)", min_value=0.1, max_value=1000.0, value=6.0, step=0.1)
+            capacity_mwh = 0.0
+            capacity_str = f"{capacity} MW"
 
-        # 电压等级（强制只用系统推荐）
         recommended_voltage = recommend_voltage(capacity, project_type)
         st.write(f"**系统推荐接入电压等级**：**{recommended_voltage}**")
         st.info("电压等级已强制使用系统推荐，实际仍需以国网湖南电力接入系统方案为准。")
@@ -359,22 +389,25 @@ def main():
         market_participation = st.checkbox("参与现货市场/竞价", value=True)
 
         with st.expander("🧮 高级测算参数"):
-            hours = st.number_input("首年等效利用小时数 (h)", min_value=0.0, max_value=5000.0, value=float(get_default_hours(project_type)), step=10.0)
-            capex_wan_per_mw = st.number_input("单位投资 (万元/MW)", min_value=0.0, max_value=20000.0, value=float(get_default_capex(project_type)), step=10.0)
+            if project_type != "用户侧储能":
+                hours = st.number_input("首年等效利用小时数 (h)", min_value=0.0, max_value=5000.0, value=float(get_default_hours(project_type)), step=10.0)
+                capex_input = st.number_input("单位投资 (万元/MW)", min_value=0.0, max_value=20000.0, value=float(get_default_capex(project_type)), step=10.0)
+                storage_duration = st.number_input("配建储能时长 (h)", min_value=0.5, max_value=8.0, value=2.0, step=0.5)
+            else:
+                hours = 0.0
+                capex_input = st.number_input("单位投资 (万元/MWh)", min_value=0.0, max_value=20000.0, value=float(get_default_capex(project_type)), step=10.0)
+                
             mechanism_price = st.number_input("增量光伏项目上网电量的80%享受机制电价 (元/kWh)", min_value=0.0, max_value=1.5, value=0.32, step=0.01)
             market_price = st.number_input("现货/余电电价 (元/kWh)", min_value=0.0, max_value=1.5, value=0.25, step=0.01)
             self_use_price = st.number_input("自发自用替代电价 (元/kWh)", min_value=0.0, max_value=2.0, value=0.65, step=0.01)
             peak_valley_spread = st.number_input("储能峰谷价差 (元/kWh)", min_value=0.0, max_value=2.0, value=0.60, step=0.01)
-            storage_duration = st.number_input("储能时长 (h)", min_value=0.5, max_value=8.0, value=2.0, step=0.5)
 
         submitted = st.form_submit_button("🚀 一键校验并生成报告", type="primary")
 
-    # 2. 当点击提交按钮时，更新 session_state 状态
     if submitted:
         st.session_state.show_report = True
 
-    # ==================== 右侧报告（修复版） ====================
-    # 3. 将判断条件改为依赖 session_state，避免由于重绘丢失状态
+    # ==================== 右侧报告 ====================
     if st.session_state.show_report:
         with st.spinner("正在调用湖南省用地红线、电网消纳、接入电压及政策规则引擎进行核查..."):
             lat, lon, coord_ok = parse_location(project_location)
@@ -383,7 +416,7 @@ def main():
                 st.warning("未能从输入中解析有效坐标，已默认定位到长沙市示例坐标。")
 
             recommended_voltage = recommend_voltage(capacity, project_type)
-            selected_voltage = recommended_voltage  # 强制只用系统推荐
+            selected_voltage = recommended_voltage
 
             land_res = evaluate_land(project_type, land_use, has_certificate, self_use_ratio)
             grid_res = evaluate_grid(consumption_zone, lat, lon, capacity, project_type)
@@ -394,9 +427,8 @@ def main():
             overall_status = "拦截" if any(item["status"] == "拦截" for item in results) else ("警告" if any(item["status"] == "警告" for item in results) else "通过")
 
             risks = build_risks(project_type, capacity, market_participation, self_use_ratio, land_res, grid_res, voltage_res, green_res)
-            finance = calculate_finance(project_type, capacity, hours, capex_wan_per_mw, mechanism_price, market_price, self_use_price, self_use_ratio, peak_valley_spread, storage_duration)
+            finance = calculate_finance(project_type, capacity, hours, capex_input, mechanism_price, market_price, self_use_price, self_use_ratio, peak_valley_spread, storage_duration)
 
-        # 右侧报告
         st.header("📊 实时校验结果与完整测算报告")
 
         if overall_status == "通过":
@@ -414,8 +446,8 @@ def main():
 
         st.subheader("📝 参数明细")
         param_df = pd.DataFrame({
-            "参数指标": ["项目类型", "项目坐标/地址", "装机容量 (MW)", "用户选择接入电压等级", "系统推荐接入电压等级", "用地性质", "是否取得审批/权属证明", "自发自用比例 (%)", "电网消纳区域", "现货市场/竞价参与", "首年等效利用小时数 (h)", "单位投资 (万元/MW)"],
-            "输入值": [project_type, project_location, f"{capacity} MW", selected_voltage, recommended_voltage, land_use, "是" if has_certificate else "否", self_use_ratio, consumption_zone, "参与" if market_participation else "不参与", hours if project_type != "用户侧储能" else "按储能策略测算", capex_wan_per_mw]
+            "参数指标": ["项目类型", "项目坐标/地址", "装机容量", "用户选择接入电压等级", "系统推荐接入电压等级", "用地性质", "是否取得审批/权属证明", "自发自用比例 (%)", "电网消纳区域", "现货市场/竞价参与", "首年等效利用小时数 (h)", f"单位投资 ({'万元/MWh' if project_type=='用户侧储能' else '万元/MW'})"],
+            "输入值": [project_type, project_location, capacity_str, selected_voltage, recommended_voltage, land_use, "是" if has_certificate else "否", self_use_ratio, consumption_zone, "参与" if market_participation else "不参与", hours if project_type != "用户侧储能" else "不适用", capex_input]
         })
         st.table(param_df)
 
@@ -451,9 +483,8 @@ def main():
 
         st.subheader("📥 报告下载")
         
-        # 使用新增的函数动态生成 Markdown 报告
         markdown_report = build_markdown_report(
-            project_type, capacity, project_location, selected_voltage, 
+            project_type, capacity_str, project_location, selected_voltage, 
             land_res, grid_res, voltage_res, green_res, overall_status, risks, finance
         )
         
