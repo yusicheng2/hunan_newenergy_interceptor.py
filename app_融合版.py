@@ -17,14 +17,6 @@ st.set_page_config(
 
 PROJECT_TYPES = ["光伏", "风电", "用户侧储能", "绿电直连"]
 
-VOLTAGE_OPTIONS = [
-    "10(6) kV",
-    "35 kV",
-    "110 kV",
-    "220 kV",
-    ">220 kV"
-]
-
 VOLTAGE_MAP = {
     "10(6) kV": 10,
     "35 kV": 35,
@@ -39,6 +31,7 @@ POLICY_CAPTION = (
     "《湖南省深化新能源上网电价市场化改革促进新能源高质量发展实施方案》（湘发改价调〔2025〕663号）"
     "及湖南省发改委、能源局、国网湖南电力相关并网消纳、现货交易、可开放容量管理要求。"
 )
+
 
 # ============================================================
 # 基础工具函数
@@ -283,6 +276,7 @@ def main():
     st.title("🌟 湖南省新能源投资项目事前拦截与测算报告系统")
     st.caption(POLICY_CAPTION)
 
+    # 左侧输入（电压强制系统推荐）
     with st.sidebar.form("project_form"):
         st.header("📋 项目输入")
 
@@ -312,9 +306,9 @@ def main():
             peak_valley_spread = st.number_input("储能峰谷价差 (元/kWh)", min_value=0.0, max_value=2.0, value=0.60, step=0.01)
             storage_duration = st.number_input("储能时长 (h)", min_value=0.5, max_value=8.0, value=2.0, step=0.5)
 
-        # 按钮移出表单
         submitted = st.form_submit_button("🚀 一键校验并生成报告", type="primary")
 
+    # ==================== 右侧报告（修复版） ====================
     if submitted:
         with st.spinner("正在调用湖南省用地红线、电网消纳、接入电压及政策规则引擎进行核查..."):
             lat, lon, coord_ok = parse_location(project_location)
@@ -336,7 +330,7 @@ def main():
             risks = build_risks(project_type, capacity, market_participation, self_use_ratio, land_res, grid_res, voltage_res, green_res)
             finance = calculate_finance(project_type, capacity, hours, capex_wan_per_mw, mechanism_price, market_price, self_use_price, self_use_ratio, peak_valley_spread, storage_duration)
 
-        # ==================== 右侧报告内容（已修复） ====================
+        # 右侧报告
         st.header("📊 实时校验结果与完整测算报告")
 
         if overall_status == "通过":
@@ -346,14 +340,12 @@ def main():
         else:
             st.error("❌ 项目触发事前拦截项。")
 
-        # 校验指标卡
         col1, col2, col3, col4 = st.columns(4)
         col1.metric("用地性质红线", land_res["status"], delta="合规" if land_res["pass"] else "风险")
         col2.metric("电网消纳红区", grid_res["status"], delta="可继续" if grid_res["pass"] else "拦截")
         col3.metric("接入电压等级", voltage_res["status"], delta=f"推荐：{recommended_voltage}")
         col4.metric("绿电直连专项", green_res["status"], delta="适用" if project_type == "绿电直连" else "非绿电直连")
 
-        # 参数明细
         st.subheader("📝 参数明细")
         param_df = pd.DataFrame({
             "参数指标": ["项目类型", "项目坐标/地址", "装机容量 (MW)", "用户选择接入电压等级", "系统推荐接入电压等级", "用地性质", "是否取得审批/权属证明", "自发自用比例 (%)", "电网消纳区域", "现货市场/竞价参与", "首年等效利用小时数 (h)", "单位投资 (万元/MW)"],
@@ -361,17 +353,14 @@ def main():
         })
         st.table(param_df)
 
-        # 合规风险标注
         st.subheader("🛡️ 合规风险标注（自动追加）")
         for risk in risks:
             st.markdown(risk)
 
-        # GIS核查图
         st.subheader("🗺️ GIS核查图")
         gis_map = render_gis_map(lat, lon, overall_status, project_type, capacity, project_location)
         st_folium(gis_map, width=850, height=450)
 
-        # 投资测算
         st.subheader("📈 投资测算报告（简化版）")
         fin_col1, fin_col2, fin_col3, fin_col4 = st.columns(4)
         fin_col1.metric("初始投资估算", f"{finance['capex_wan']:,.0f} 万元")
@@ -381,24 +370,25 @@ def main():
             fin_col4.metric("静态投资回收期", f"{finance['payback_years']:.2f} 年")
         else:
             st.metric("静态投资回收期", "暂无法测算")
-
         st.write(f"**年运维成本估算**：{finance['opex_wan']:,.2f} 万元 | **年净收益估算**：{finance['net_income_wan']:,.2f} 万元 | **简化年收益率**：{finance.get('simple_return_pct', 0):.2f}%")
 
-        # 其他提示
         if project_type == "绿电直连":
             st.info("绿电直连提示：项目应坚持‘以荷定源’...")
         if project_type == "用户侧储能":
             st.info("用户侧储能提示：...")
 
-        # 合规路径建议
         st.subheader("💡 合规路径建议")
         if overall_status == "通过":
             st.success("**立即可行路径建议**：\n1. 对接属地发改/能源主管部门...")
+        elif overall_status == "警告":
+            st.warning("**需整改后推进路径建议**：\n1. 补充自然资源局、林业局等部门用地合规证明...")
 
-        # 报告下载
         st.subheader("📥 报告下载")
-        markdown_report = "报告内容（示例）"  # 实际可扩展 build_markdown_report
+        markdown_report = "报告内容（示例）"  # 实际可扩展 build_markdown_report 函数
         st.download_button("下载完整测算报告（Markdown）", data=markdown_report, file_name=f"湖南新能源项目合规测算报告_{project_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md", mime="text/markdown")
+
+        # 强制清空状态，避免刷新
+        st.session_state["submitted"] = False
 
     else:
         st.info("👈 请在左侧输入参数，点击【一键校验并生成报告】后右侧将立即显示完整报告。")
