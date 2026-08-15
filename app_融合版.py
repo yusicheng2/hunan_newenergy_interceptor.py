@@ -276,6 +276,10 @@ def main():
     st.title("🌟 湖南省新能源投资项目事前拦截与测算报告系统")
     st.caption(POLICY_CAPTION)
 
+    # 1. 初始化 session_state，用于记住报告是否需要显示
+    if 'show_report' not in st.session_state:
+        st.session_state.show_report = False
+
     # 左侧输入（电压强制系统推荐）
     with st.sidebar.form("project_form"):
         st.header("📋 项目输入")
@@ -308,8 +312,13 @@ def main():
 
         submitted = st.form_submit_button("🚀 一键校验并生成报告", type="primary")
 
-    # ==================== 右侧报告（修复版） ====================
+    # 2. 当点击提交按钮时，更新 session_state 状态
     if submitted:
+        st.session_state.show_report = True
+
+    # ==================== 右侧报告（修复版） ====================
+    # 3. 将判断条件改为依赖 session_state，避免由于重绘丢失状态
+    if st.session_state.show_report:
         with st.spinner("正在调用湖南省用地红线、电网消纳、接入电压及政策规则引擎进行核查..."):
             lat, lon, coord_ok = parse_location(project_location)
             if not coord_ok:
@@ -386,9 +395,6 @@ def main():
         st.subheader("📥 报告下载")
         markdown_report = "报告内容（示例）"  # 实际可扩展 build_markdown_report 函数
         st.download_button("下载完整测算报告（Markdown）", data=markdown_report, file_name=f"湖南新能源项目合规测算报告_{project_type}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md", mime="text/markdown")
-
-        # 强制清空状态，避免刷新
-        st.session_state["submitted"] = False
 
     else:
         st.info("👈 请在左侧输入参数，点击【一键校验并生成报告】后右侧将立即显示完整报告。")
