@@ -358,20 +358,29 @@ def main():
     if 'show_report' not in st.session_state:
         st.session_state.show_report = False
 
-    # 左侧输入
-    with st.sidebar.form("project_form"):
-        st.header("📋 项目输入")
+    # 将项目类型提取到 form 外部，以触发左侧边栏界面动态刷新
+    st.sidebar.header("📋 项目输入")
+    project_type = st.sidebar.selectbox("项目类型", PROJECT_TYPES, index=0)
 
-        project_type = st.selectbox("项目类型", PROJECT_TYPES, index=0)
+    # 包含提交按钮的表单
+    with st.sidebar.form("project_form"):
         project_location = st.text_input("项目坐标或详细地址", value="资兴市杉杉大道525号")
         
         # 根据项目类型拆分容量参数设置
         if project_type == "用户侧储能":
             capacity = st.number_input("储能PCS额定功率 (MW)", min_value=0.1, max_value=1000.0, value=7.5, step=0.1)
-            capacity_mwh = st.number_input("储能装机容量 (MWh)", min_value=0.1, max_value=2000.0, value=15.0, step=0.1)
+            capacity_mwh = st.number_input("储能装机容量 (MWh)", min_value=0.0, max_value=30.0, value=15.0, step=0.1)
             storage_duration = capacity_mwh / capacity if capacity > 0 else 2.0
             capacity_str = f"{capacity} MW / {capacity_mwh} MWh"
-        else:
+        elif project_type == "光伏":
+            capacity = st.number_input("装机容量 (MW)", min_value=0.0, max_value=6.0, value=6.0, step=0.1)
+            capacity_mwh = 0.0
+            capacity_str = f"{capacity} MW"
+        elif project_type == "风电":
+            capacity = st.number_input("风电装机容量 (MW)", min_value=0.1, max_value=1000.0, value=20.0, step=1.0)
+            capacity_mwh = 0.0
+            capacity_str = f"{capacity} MW"
+        else: # 绿电直连
             capacity = st.number_input("装机容量 (MW)", min_value=0.1, max_value=1000.0, value=6.0, step=0.1)
             capacity_mwh = 0.0
             capacity_str = f"{capacity} MW"
@@ -389,13 +398,22 @@ def main():
         market_participation = st.checkbox("参与现货市场/竞价", value=True)
 
         with st.expander("🧮 高级测算参数"):
-            if project_type != "用户侧储能":
+            # 根据项目类型动态显示高级测算参数
+            if project_type == "光伏":
+                hours = st.number_input("首年等效利用小时数 (h)", min_value=0.0, max_value=5000.0, value=float(get_default_hours(project_type)), step=10.0)
+                capex_input = st.number_input("单位投资 (万元/MW) [含SVG和四可装置费用]", min_value=0.0, max_value=20000.0, value=280.0, step=10.0)
+                storage_duration = st.number_input("配建储能时长 (h)", min_value=0.5, max_value=8.0, value=2.0, step=0.5)
+            elif project_type == "用户侧储能":
+                hours = 0.0
+                capex_input = st.number_input("单位投资 (万元/MWh)", min_value=0.0, max_value=20000.0, value=70.0, step=10.0)
+            elif project_type == "风电":
+                hours = st.number_input("首年等效利用小时数 (h)", min_value=0.0, max_value=5000.0, value=float(get_default_hours(project_type)), step=10.0)
+                capex_input = st.number_input("风电单位投资 (万元/MW)", min_value=0.0, max_value=20000.0, value=620.0, step=10.0)
+                storage_duration = st.number_input("配建储能时长 (h)", min_value=0.5, max_value=8.0, value=2.0, step=0.5)
+            else:
                 hours = st.number_input("首年等效利用小时数 (h)", min_value=0.0, max_value=5000.0, value=float(get_default_hours(project_type)), step=10.0)
                 capex_input = st.number_input("单位投资 (万元/MW)", min_value=0.0, max_value=20000.0, value=float(get_default_capex(project_type)), step=10.0)
                 storage_duration = st.number_input("配建储能时长 (h)", min_value=0.5, max_value=8.0, value=2.0, step=0.5)
-            else:
-                hours = 0.0
-                capex_input = st.number_input("单位投资 (万元/MWh)", min_value=0.0, max_value=20000.0, value=float(get_default_capex(project_type)), step=10.0)
                 
             mechanism_price = st.number_input("增量光伏项目上网电量的80%享受机制电价 (元/kWh)", min_value=0.0, max_value=1.5, value=0.32, step=0.01)
             market_price = st.number_input("现货/余电电价 (元/kWh)", min_value=0.0, max_value=1.5, value=0.25, step=0.01)
