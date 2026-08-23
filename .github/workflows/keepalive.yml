@@ -34,7 +34,7 @@ jobs:
 
           # 需要保活的 Streamlit 网址列表
           urls = [
-              "https://gd-spot-market-model-jyjm735k5rr4aztjy8chcf.streamlit.app/"
+              "https://yusicheng2--hunan-newenergy-interceptor-47wcnnngvergdtti2dnzm.streamlit.app/"
           ]
 
           async def visit(url):
