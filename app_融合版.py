@@ -419,11 +419,15 @@ def main():
             # 计算园区收益分成绝对金额
             annual_share_wan = (share_vol * share_price) if share_mode == "模式一：按年总用电量分成" else share_fixed
 
+            # ------------------ 变量声明修复区域 ------------------
             recommended_voltage = recommend_voltage(capacity, project_type, project_location)
+            selected_voltage = recommended_voltage # 补充定义 missing 变量
+            # ------------------------------------------------------
+
             land_res = evaluate_land(project_type, land_use, has_certificate, self_use_ratio, project_location)
             grid_res = evaluate_grid(consumption_zone, lat, lon, capacity, project_type)
-            voltage_res = evaluate_voltage(recommended_voltage, recommended_voltage, capacity, project_type)
-            green_res = evaluate_green_direct(project_type, self_use_ratio, recommended_voltage)
+            voltage_res = evaluate_voltage(selected_voltage, recommended_voltage, capacity, project_type)
+            green_res = evaluate_green_direct(project_type, self_use_ratio, selected_voltage)
 
             results = [land_res, grid_res, voltage_res, green_res]
             overall_status = "拦截" if any(item["status"] == "拦截" for item in results) else ("警告" if any(item["status"] == "警告" for item in results) else "通过")
