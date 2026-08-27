@@ -46,6 +46,11 @@ st.markdown(
     unsafe_allow_html=True
 )
 
+# ============================================================
+# 全局常量与配置
+# ============================================================
+GAODE_API_KEY = "329b933dc071ee692786cd278dfa6505"
+
 PROJECT_TYPES = ["光伏", "风电", "用户侧储能", "绿电直连"]
 
 VOLTAGE_MAP = {
@@ -70,6 +75,21 @@ def parse_location(text):
     if not text:
         return None, None, False
 
+    # 1. 优先调用高德地图 API 解析地址
+    try:
+        url = "https://restapi.amap.com/v3/geocode/geo"
+        params = {'address': text, 'key': GAODE_API_KEY, 'output': 'json'}
+        response = requests.get(url, params=params, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get('status') == '1' and data.get('geocodes'):
+                location = data['geocodes'][0]['location']
+                lon, lat = location.split(',')
+                return float(lat), float(lon), True
+    except Exception:
+        pass 
+
+    # 2. 原有正则提取及 OSM 备用逻辑
     m_lat = re.search(r"([-+]?\d+(?:\.\d+)?)\s*(?:°|度)?\s*N", text, re.IGNORECASE)
     m_lon = re.search(r"([-+]?\d+(?:\.\d+)?)\s*(?:°|度)?\s*E", text, re.IGNORECASE)
     if m_lat and m_lon:
@@ -101,6 +121,7 @@ def parse_location(text):
     except Exception:
         pass 
 
+    # 兜底定位：湖南资兴市坐标
     if "资兴" in text:
         return 25.9765, 113.2356, True
 
@@ -246,9 +267,21 @@ def calculate_finance(project_type, capacity, hours, capex_input, mechanism_pric
             "payback_years": payback, "self_kwh": self_kwh, "export_kwh": export_kwh
         }
 
+# ============================================================
+# GIS 地图函数 (高德底图渲染)
+# ============================================================
+
 def render_gis_map(lat, lon, overall_status, project_type, capacity, address_text):
     color = "green" if overall_status == "通过" else ("orange" if overall_status == "警告" else "red")
-    m = folium.Map(location=[lat, lon], zoom_start=12)
+    
+    # 替换为高德地图底图配置
+    m = folium.Map(
+        location=[lat, lon], 
+        zoom_start=13,
+        tiles='https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
+        attr='高德地图',
+        prefer_canvas=True
+    )
     folium.Marker(
         location=[lat, lon],
         popup=f"类型：{project_type}<br>容量：{capacity}MW<br>地址：{address_text}"
