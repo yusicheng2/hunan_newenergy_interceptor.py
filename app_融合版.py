@@ -471,7 +471,7 @@ def main():
         st.info("👈 请在左侧完善项目边界条件参数，点击【一键校验并生成合规审查报告】后立即展示评估台账。")
         
     st.markdown("---")
-    st.caption("© 2026 广东圣马律师事务所 | 慎独 · 专注 · 专业")
+    st.caption("© 2026 yusicheng lawyer | 慎独 · 专注 · 专业")
 
 if __name__ == "__main__":
     main()
